@@ -10,7 +10,13 @@ import { Clipboard, UserPlus, CheckCircle2, Clock, Check } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { createSupabaseClient } from "@/lib/supabase/client"
 
-export function InviteBuyerForm({ dealId }: { dealId: string }) {
+interface InviteBuyerFormProps {
+    dealId: string
+    hasBuyer?: boolean
+    dealStatus?: string
+}
+
+export function InviteBuyerForm({ dealId, hasBuyer, dealStatus }: InviteBuyerFormProps) {
     const [phone, setPhone] = useState("")
     const [lastInviteLink, setLastInviteLink] = useState("")
     const [error, setError] = useState("")
@@ -18,6 +24,9 @@ export function InviteBuyerForm({ dealId }: { dealId: string }) {
     const [copied, setCopied] = useState(false)
     const [invitations, setInvitations] = useState<any[]>([])
     const supabase = createSupabaseClient()
+
+    const hasAcceptedInvitation = invitations.some((inv) => inv.status === "ACCEPTED")
+    const isInviteDisabled = (hasBuyer && hasAcceptedInvitation) || (dealStatus && dealStatus !== "DRAFT")
 
     // Load invitations on mount
     useEffect(() => {
@@ -64,6 +73,7 @@ export function InviteBuyerForm({ dealId }: { dealId: string }) {
 
     async function handleSubmit(e: React.FormEvent) {
         e.preventDefault()
+        if (isInviteDisabled) return
         setLoading(true)
         setError("")
         setLastInviteLink("")
@@ -90,18 +100,28 @@ export function InviteBuyerForm({ dealId }: { dealId: string }) {
                 </CardTitle>
             </CardHeader>
             <CardContent className="px-0 space-y-6">
-                <form onSubmit={handleSubmit} className="flex gap-3">
-                    <Input
-                        placeholder="מספר טלפון של הקונה (050...)"
-                        value={phone}
-                        onChange={(e) => setPhone(e.target.value)}
-                        required
-                        className="flex-1 bg-surface-container-lowest border-outline-variant focus:ring-1 focus:ring-primary focus:border-primary text-right"
-                    />
-                    <Button type="submit" disabled={loading} className="whitespace-nowrap font-bold bg-primary text-on-primary hover:bg-primary-fixed-dim">
-                        {loading ? "מייצר..." : "שלח הזמנה"}
-                    </Button>
-                </form>
+                {isInviteDisabled ? (
+                    <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-xl flex items-center gap-3 animate-in fade-in">
+                        <CheckCircle2 className="h-5 w-5 text-emerald-400 shrink-0" />
+                        <div>
+                            <p className="text-sm font-bold text-emerald-400">קונה הצטרף לעסקה זו 👤</p>
+                            <p className="text-xs text-slate-300">העסקה אושרה ע״י הקונה והועברה להמשך טיפול. האפשרות להזמנת קונים נוספים הופסקה.</p>
+                        </div>
+                    </div>
+                ) : (
+                    <form onSubmit={handleSubmit} className="flex gap-3">
+                        <Input
+                            placeholder="מספר טלפון של הקונה (050...)"
+                            value={phone}
+                            onChange={(e) => setPhone(e.target.value)}
+                            required
+                            className="flex-1 bg-surface-container-lowest border-outline-variant focus:ring-1 focus:ring-primary focus:border-primary text-right"
+                        />
+                        <Button type="submit" disabled={loading} className="whitespace-nowrap font-bold bg-primary text-on-primary hover:bg-primary-fixed-dim">
+                            {loading ? "מייצר..." : "שלח הזמנה"}
+                        </Button>
+                    </form>
+                )}
 
                 {lastInviteLink && (
                     <div className="p-4 bg-primary/10 border border-primary/20 rounded-xl space-y-3 animate-in fade-in duration-300">

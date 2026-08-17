@@ -1,24 +1,93 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { createSupabaseClient } from "@/lib/supabase/client"
 import { toast } from "sonner"
 
+async function fetchLawyerQueueApi() {
+    try {
+        const res = await fetch(`/api/lawyer-queue?t=${Date.now()}`, {
+            method: "GET",
+            cache: "no-store",
+            headers: {
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+            },
+        })
+        if (!res.ok) return null
+        return (await res.json()) as {
+            count: number
+            latestId: string | null
+            latestUpdatedAt: string | null
+            latestStatus: string | null
+            latestTitle: string | null
+        }
+    } catch (err) {
+        console.error("[LawyerRealtimePoll Error]:", err)
+        return null
+    }
+}
+
 export function LawyerRealtimeListener() {
     const router = useRouter()
+    const lastUpdatedAtRef = useRef<string>("")
+    const lastCountRef = useRef<number>(-1)
+    const isInitializedRef = useRef<boolean>(false)
 
     useEffect(() => {
         const supabase = createSupabaseClient()
         let isSubscribed = true
 
-        // 1. Active Poll for Lawyer Console (Every 4 seconds)
-        const pollInterval = setInterval(() => {
-            if (!isSubscribed) return
-            router.refresh()
-        }, 4000)
+        console.log("%c[LawyerRT] 🚀 Listener Mounted for Lawyer Queue", "color: #00ffff; font-weight: bold")
 
-        // 2. Realtime WebSocket Stream
+        // 1. Uncached Active Poll for Lawyer Console (Every 2 seconds)
+        const pollInterval = setInterval(async () => {
+            if (!isSubscribed) return
+            try {
+                const data = await fetchLawyerQueueApi()
+                if (!data) return
+
+                const currentUpdatedAt = data.latestUpdatedAt || ""
+                const currentCount = data.count || 0
+
+                // Seed baseline state on first poll after mount
+                if (!isInitializedRef.current) {
+                    lastUpdatedAtRef.current = currentUpdatedAt
+                    lastCountRef.current = currentCount
+                    isInitializedRef.current = true
+                    return
+                }
+
+                // Detect changes in queue count or latest deal timestamp
+                const isCountChanged = lastCountRef.current !== -1 && currentCount !== lastCountRef.current
+                const isTimestampChanged = lastUpdatedAtRef.current && currentUpdatedAt !== lastUpdatedAtRef.current
+
+                if (isCountChanged || isTimestampChanged) {
+                    console.log("%c[LawyerRT] ⚡ QUEUE CHANGE DETECTED!", "color: #ff0055; font-weight: bold", {
+                        prevCount: lastCountRef.current,
+                        newCount: currentCount,
+                        prevUpdate: lastUpdatedAtRef.current,
+                        newUpdate: currentUpdatedAt
+                    })
+
+                    toast.info("⚖️ עדכון בתור עסקאות", {
+                        description: `עסקה ${data.latestTitle || ""} עודכנה (סטטוס: ${data.latestStatus || ""})`,
+                        duration: 5000,
+                    })
+
+                    lastUpdatedAtRef.current = currentUpdatedAt
+                    lastCountRef.current = currentCount
+
+                    // Hard reload to refresh server components and queue list
+                    window.location.reload()
+                }
+            } catch (err) {
+                console.error("[LawyerRealtimePoll Error]:", err)
+            }
+        }, 2000)
+
+        // 2. Realtime WebSocket Push Stream
         const setupLawyerChannel = async () => {
             try {
                 const { data: { session } } = await supabase.auth.getSession()
@@ -38,7 +107,7 @@ export function LawyerRealtimeListener() {
                         (payload: any) => {
                             if (!isSubscribed) return
                             const newDeal = payload.new as any
-                            console.log("[Lawyer Realtime Event]:", payload.eventType, newDeal)
+                            console.log("[Lawyer Realtime WS Event]:", payload.eventType, newDeal)
 
                             if (payload.eventType === "INSERT") {
                                 toast.info("⚖️ עסקה חדשה במערכת!", {
@@ -52,12 +121,7 @@ export function LawyerRealtimeListener() {
                                 })
                             }
 
-                            router.refresh()
-                            setTimeout(() => {
-                                if (typeof window !== "undefined" && window.location.pathname === "/lawyer") {
-                                    window.location.reload()
-                                }
-                            }, 300)
+                            window.location.reload()
                         }
                     )
                     .subscribe()

@@ -63,7 +63,7 @@ export default async function JoinDealPage(props: {
     return (
         <>
             <Navbar user={user} />
-            <DealRealtimeListener dealId={deal.id} currentStatus={deal.status} />
+            <DealRealtimeListener dealId={deal.id} currentStatus={deal.status} currentPaymentProofUrl={deal.payment_proof_url} />
             <div className="min-h-screen bg-background text-foreground py-12 px-4 sm:px-6 lg:px-8" dir="rtl">
                 <div className="max-w-xl mx-auto space-y-6">
                     <BackButton href="/dashboard" label="חזור ללוח הבקרה" className="text-on-surface-variant hover:text-primary transition-colors" />

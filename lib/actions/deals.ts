@@ -65,6 +65,9 @@ export async function inviteBuyer(dealId: string, buyerPhone: string) {
   }
 
   if ((deal as any).status === "EXPIRED") return { error: "לא ניתן להזמין קונה לעסקה שפגה" }
+  if ((deal as any).buyer_id || (deal as any).status !== "DRAFT") {
+    return { error: "קונה כבר הצטרף לעסקה זו. לא ניתן להזמין קונים נוספים." }
+  }
 
   // 3. Normalize Input (Can be Phone or Email)
   const rawInput = buyerPhone.trim().toLowerCase()
@@ -176,11 +179,6 @@ export async function inviteBuyer(dealId: string, buyerPhone: string) {
     return { error: "שגיאה ביצירת הזמנה" }
   }
 
-  // 5.5 Link buyer_id directly to deals table so buyer deal list updates in real time
-  await (serviceClient.from("deals") as any)
-    .update({ buyer_id: targetUserId })
-    .eq("id", dealId)
-
   // 6. Notify Buyer (Registered user or shadow user)
   await createNotification({
     userId: targetUserId,
@@ -281,6 +279,16 @@ export async function createDeal(formData: FormData) {
     }
   }
 
+  const ocrDataJson = formData.get("ocrData") as string
+  let ocrData: any = {}
+  if (ocrDataJson) {
+    try {
+      ocrData = JSON.parse(ocrDataJson)
+    } catch {
+      ocrData = {}
+    }
+  }
+
   if (firstName && lastName && idNumber) {
     await (serviceClient.from("profiles") as any).upsert({
       id: user.id,
@@ -320,7 +328,8 @@ export async function createDeal(formData: FormData) {
         vehicle_reg_owner_name: vehicleRegOwnerName,
         vehicle_reg_owner_id: vehicleRegOwnerId,
         thumbnail_url: thumbnailUrl,
-        vehicle_images: vehicleImages
+        vehicle_images: vehicleImages,
+        ocr_data: ocrData,
       },
     ])
     .select()
@@ -439,14 +448,6 @@ export async function getDealById(dealId: string) {
         return null
       }
     }
-
-    // Ensure buyer_id is updated on the deal record if not set
-    if (!enrichedDeal.buyer_id && enrichedDeal.seller_id !== user.id) {
-      await (serviceClient.from("deals") as any)
-        .update({ buyer_id: user.id })
-        .eq("id", dealId)
-      enrichedDeal.buyer_id = user.id
-    }
   }
 
   return enrichedDeal
@@ -533,7 +534,7 @@ export async function approveDeal(dealId: string) {
 
   // Verify it's the buyer
   const { data: deal } = await (serviceClient.from("deals") as any)
-    .select("buyer_id, status")
+    .select("seller_id, buyer_id, status, title")
     .eq("id", dealId)
     .single()
 
@@ -542,7 +543,10 @@ export async function approveDeal(dealId: string) {
   if (deal.status !== "DRAFT") return { error: "העסקה כבר אושרה או שאינה במצב טיוטה" }
 
   const { error } = await (serviceClient.from("deals") as any)
-    .update({ status: "SUBMITTED" })
+    .update({
+      status: "SUBMITTED",
+      updated_at: new Date().toISOString()
+    })
     .eq("id", dealId)
 
   if (error) {
@@ -600,7 +604,10 @@ export async function rejectDeal(dealId: string) {
   if (deal.status !== "DRAFT") return { error: "לא ניתן לדחות עסקה שאינה בסטטוס טיוטה" }
 
   const { error } = await (serviceClient.from("deals") as any)
-    .update({ status: "CANCELLED" })
+    .update({
+      status: "CANCELLED",
+      updated_at: new Date().toISOString()
+    })
     .eq("id", dealId)
 
   if (error) {
@@ -621,16 +628,16 @@ export async function updateDealStatus(dealId: string, newStatus: string) {
   }
 
   const validTransitions: Record<string, string[]> = {
-    draft: ["submitted", "expired", "cancelled"],
-    submitted: ["under_review", "expired", "cancelled"],
-    under_review: ["awaiting_payment", "expired", "cancelled"],
-    awaiting_payment: ["payment_verification", "expired", "cancelled"],
-    payment_verification: ["ownership_transfer_pending", "expired", "cancelled"],
-    ownership_transfer_pending: ["completed", "expired", "cancelled"],
-    completed: [],
-    cancelled: [],
-    expired: [],
-    ready_for_next_stage: ["expired"] // Legacy cleanup
+    DRAFT: ["SUBMITTED", "EXPIRED", "CANCELLED"],
+    SUBMITTED: ["UNDER_REVIEW", "EXPIRED", "CANCELLED"],
+    UNDER_REVIEW: ["AWAITING_PAYMENT", "EXPIRED", "CANCELLED"],
+    AWAITING_PAYMENT: ["PAYMENT_VERIFICATION", "EXPIRED", "CANCELLED"],
+    PAYMENT_VERIFICATION: ["OWNERSHIP_TRANSFER_PENDING", "EXPIRED", "CANCELLED"],
+    OWNERSHIP_TRANSFER_PENDING: ["COMPLETED", "EXPIRED", "CANCELLED"],
+    COMPLETED: [],
+    CANCELLED: [],
+    EXPIRED: [],
+    READY_FOR_NEXT_STAGE: ["EXPIRED", "CANCELLED"]
   }
 
   // Get current deal status
@@ -645,7 +652,10 @@ export async function updateDealStatus(dealId: string, newStatus: string) {
   // Lawyer/Admin Override: Allow Lawyer/Admin to move to ANY status
   const isLawyerOrAdmin = (user as any).role === 'lawyer' || (user as any).role === 'admin'
 
-  if (!isLawyerOrAdmin && !validTransitions[deal.status]?.includes(newStatus)) {
+  const currentStatusUpper = (deal.status || "").toUpperCase()
+  const newStatusUpper = (newStatus || "").toUpperCase()
+
+  if (!isLawyerOrAdmin && !validTransitions[currentStatusUpper]?.includes(newStatusUpper)) {
     return { error: `מעבר לא חוקי מ-${deal.status} ל-${newStatus}` }
   }
 
@@ -655,7 +665,10 @@ export async function updateDealStatus(dealId: string, newStatus: string) {
      If seller, enforce seller_id match to prevent unauthorized updates.
   */
   let query = (serviceClient.from("deals") as any)
-    .update({ status: newStatus })
+    .update({
+      status: newStatus,
+      updated_at: new Date().toISOString()
+    })
     .eq("id", dealId)
 
   if (!isLawyerOrAdmin) {
@@ -705,15 +718,17 @@ export async function updateDealStatus(dealId: string, newStatus: string) {
 export async function getLatestDealStatus(dealId: string) {
   const serviceClient = getServiceRoleClient()
   const { data, error } = await (serviceClient.from("deals") as any)
-    .select("status, updated_at")
+    .select("status, updated_at, vehicle_reg_owner_id")
     .eq("id", dealId)
     .maybeSingle()
 
   if (error || !data) {
     return { status: null, error: error?.message || "Not found" }
   }
-  return { status: data.status, updatedAt: data.updated_at }
+  const paymentProof = data.vehicle_reg_owner_id?.startsWith("http") ? data.vehicle_reg_owner_id : null
+  return { status: data.status, updatedAt: data.updated_at, paymentProofUrl: paymentProof }
 }
+
 
 export async function getUserDeals() {
   const supabase = await getSupabaseClient()
@@ -835,31 +850,27 @@ export async function uploadPaymentProofAction(dealId: string, formData: FormDat
     .from("documents")
     .getPublicUrl(filePath)
 
-  // Primary update attempt with payment_proof_url column
-  const updatePayload: any = {
-    status: "PAYMENT_VERIFICATION",
-    vehicle_reg_owner_id: publicUrl,
-    updated_at: new Date().toISOString()
-  }
-
+  // Primary update with guaranteed-existing columns only
   const { error: updateError } = await (serviceClient.from("deals") as any)
-    .update({ ...updatePayload, payment_proof_url: publicUrl })
+    .update({
+      status: "PAYMENT_VERIFICATION",
+      vehicle_reg_owner_id: publicUrl,
+      updated_at: new Date().toISOString()
+    })
     .eq("id", dealId)
 
-  if (updateError && updateError.code === "PGRST204") {
-    // Schema fallback: update status without payment_proof_url column
-    const { error: fallbackError } = await (serviceClient.from("deals") as any)
-      .update(updatePayload)
-      .eq("id", dealId)
-
-    if (fallbackError) {
-      console.error("Update deal payment status fallback error:", fallbackError)
-      return { error: `שגיאה בעדכון סטטוס עסקה: ${fallbackError.message}` }
-    }
-  } else if (updateError) {
+  if (updateError) {
     console.error("Update deal payment status error:", updateError)
     return { error: `שגיאה בעדכון סטטוס עסקה: ${updateError.message}` }
   }
+
+  // Optional: try adding payment_proof_url if the column exists (non-blocking)
+  await (serviceClient.from("deals") as any)
+    .update({ payment_proof_url: publicUrl })
+    .eq("id", dealId)
+    .then(() => {})
+    .catch(() => {})
+
 
   // Create notification for lawyers / admin
   const { data: lawyerProfiles } = await (serviceClient.from("profiles") as any)
@@ -1019,9 +1030,26 @@ export async function confirmHandoverAction(dealId: string, role: "seller" | "bu
         type: "HANDOVER_UPDATE"
       })
     }
+    // Notify lawyers of handover signoff
+    const { data: lawyers } = await (serviceClient.from("profiles") as any)
+      .select("id")
+      .in("role", ["lawyer", "admin"])
+
+    if (lawyers && lawyers.length > 0) {
+      for (const lawyer of lawyers) {
+        await createNotification({
+          userId: lawyer.id,
+          title: "אישור מסירה והעברת בעלות חדש 🚗",
+          message: `${isSeller ? "המוכר" : "הקונה"} אישר את מסירת הרכב עבור עסקה ${dealId.slice(0, 8)}. ${isBothConfirmed ? "אישור דו-צדדי הושלם במלואו!" : "ממתין לאישור הצד השני."}`,
+          dealId,
+          type: "HANDOVER_UPDATE"
+        })
+      }
+    }
   }
 
   revalidatePath(`/deals/${dealId}`)
+  revalidatePath(`/lawyer/${dealId}`)
   revalidatePath("/dashboard")
   revalidatePath("/lawyer")
 
@@ -1065,3 +1093,134 @@ export async function processRefundAction(dealId: string) {
 
   return { success: true }
 }
+
+export async function updateDealOcrField(dealId: string, fieldName: string, newValue: any) {
+  const user = await getCurrentUser()
+  if (!user) return { error: "נדרשת התחברות" }
+
+  const serviceClient = getServiceRoleClient()
+
+  const { data: deal, error: fetchErr } = await (serviceClient.from("deals") as any)
+    .select("seller_id, buyer_id, ocr_data, first_name, last_name, owner_id_number, license_plate, vehicle_make, vehicle_model, vehicle_year, vehicle_reg_owner_name, vehicle_reg_owner_id")
+    .eq("id", dealId)
+    .single()
+
+  if (fetchErr || !deal) return { error: "עסקה לא נמצאה" }
+
+  const isAuthorized = deal.seller_id === user.id || deal.buyer_id === user.id || user.role === "lawyer" || user.role === "admin"
+  if (!isAuthorized) return { error: "אין הרשאה לעדכן עסקה זו" }
+
+  const fieldColumnMap: Record<string, string> = {
+    firstName: "first_name",
+    lastName: "last_name",
+    idNumber: "owner_id_number",
+    licensePlate: "license_plate",
+    vehicleMake: "vehicle_make",
+    vehicleModel: "vehicle_model",
+    vehicleYear: "vehicle_year",
+    vehicleRegOwnerName: "vehicle_reg_owner_name",
+    vehicleRegOwnerId: "vehicle_reg_owner_id",
+  }
+
+  const dbColumn = fieldColumnMap[fieldName] || fieldName
+
+  const updatedOcrData = {
+    ...(deal.ocr_data || {}),
+    fields: {
+      ...(deal.ocr_data?.fields || {}),
+      [fieldName]: {
+        ...(deal.ocr_data?.fields?.[fieldName] || {}),
+        value: newValue,
+        userOverridden: true,
+      }
+    }
+  }
+
+  const { error: updateErr } = await (serviceClient.from("deals") as any)
+    .update({
+      [dbColumn]: newValue,
+      ocr_data: updatedOcrData,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", dealId)
+
+  if (updateErr) {
+    console.error("Update OCR field error:", updateErr)
+    return { error: "שגיאה בעדכון השדה" }
+  }
+
+  revalidatePath(`/deals/${dealId}`)
+  revalidatePath(`/lawyer/${dealId}`)
+  revalidatePath("/lawyer")
+  revalidatePath("/dashboard")
+
+  return { success: true }
+}
+
+export async function updateDeal(dealId: string, formData: FormData) {
+  const supabase = await getSupabaseClient()
+  const serviceClient = getServiceRoleClient() as any
+
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: "התחברות נדרשת" }
+
+  // Check deal ownership & permissions
+  const { data: deal } = await (serviceClient.from("deals") as any)
+    .select("seller_id, status, buyer_id")
+    .eq("id", dealId)
+    .maybeSingle()
+
+  if (!deal) return { error: "עסקה לא נמצאה" }
+  if (deal.seller_id !== user.id) return { error: "אין הרשאה לערוך עסקה זו" }
+
+  // Verify no invitations have been sent & no buyer is attached
+  const { data: invites } = await (serviceClient.from("deal_invitations") as any)
+    .select("id")
+    .eq("deal_id", dealId)
+
+  if ((invites && invites.length > 0) || deal.buyer_id) {
+    return { error: "לא ניתן לערוך עסקה לאחר שנשלחו הזמנות או שקונה הצטרף" }
+  }
+
+  const title = formData.get("title") as string
+  const priceILS = Number.parseFloat(formData.get("priceILS") as string)
+  const licensePlate = formData.get("licensePlate") as string
+  const vehicleMake = formData.get("vehicleMake") as string
+  const vehicleModel = formData.get("vehicleModel") as string
+  const vehicleYear = parseInt(formData.get("vehicleYear") as string) || null
+  const kilometers = parseInt(formData.get("kilometers") as string) || null
+  const engineVolume = parseInt(formData.get("engineVolume") as string) || null
+  const chassisNumber = formData.get("chassisNumber") as string || null
+
+  if (!title || !priceILS || priceILS <= 0) {
+    return { error: "כותרת ומחיר תקני נדרשים" }
+  }
+
+  const { error: updateError } = await (serviceClient.from("deals") as any)
+    .update({
+      title,
+      price_ils: priceILS,
+      license_plate: licensePlate,
+      vehicle_make: vehicleMake,
+      vehicle_model: vehicleModel,
+      vehicle_year: vehicleYear,
+      kilometers: kilometers,
+      engine_volume: engineVolume,
+      chassis_number: chassisNumber,
+      updated_at: new Date().toISOString()
+    })
+    .eq("id", dealId)
+
+  if (updateError) {
+    console.error("Update deal error:", updateError)
+    return { error: "שגיאה בעדכון העסקה" }
+  }
+
+  revalidatePath(`/deals/${dealId}`)
+  revalidatePath("/dashboard")
+  revalidatePath("/deals")
+  revalidatePath("/lawyer")
+
+  return { success: true }
+}
+

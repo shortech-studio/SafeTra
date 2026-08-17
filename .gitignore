@@ -29,3 +29,6 @@ next-env.d.ts
 
 # tesseract models
 *.traineddata
+
+# documentation / accounts info
+ACCOUNTS.md

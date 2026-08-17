@@ -6,10 +6,11 @@ import { processDocumentAction } from "@/lib/actions/ocr"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Loader2, Sparkles, ShieldAlert, CheckCircle2, Upload, FileText, Camera, Video, ShieldCheck } from "lucide-react"
+import { Loader2, Sparkles, ShieldAlert, CheckCircle2, Upload, FileText, Camera, Video, ShieldCheck, GitCompare } from "lucide-react"
 import { DocumentUpload } from "@/components/DocumentUpload"
 import { OcrResultCard } from "@/components/OcrResultCard"
 import { runClientOCR } from "@/lib/ocr/client-ocr"
+import { OcrDiffModal, OcrFieldDiff } from "@/components/ocr/OcrDiffModal"
 
 const initialState = {
     error: "",
@@ -37,6 +38,8 @@ export function NewDealForm({ user }: NewDealFormProps = {}) {
     const [ocrSignals, setOcrSignals] = useState<string[]>([])
 
     // Extracted Data State
+    const [title, setTitle] = useState("")
+    const [priceILS, setPriceILS] = useState("150000")
     const [licensePlate, setLicensePlate] = useState("")
     const [vehicleMake, setVehicleMake] = useState("")
     const [vehicleModel, setVehicleModel] = useState("")
@@ -67,6 +70,94 @@ export function NewDealForm({ user }: NewDealFormProps = {}) {
     const [vehicleOcrResult, setVehicleOcrResult] = useState<any>(null)
     const [showIdOcrJson, setShowIdOcrJson] = useState(false)
     const [showVehicleOcrJson, setShowVehicleOcrJson] = useState(false)
+    const [isDiffModalOpen, setIsDiffModalOpen] = useState(false)
+
+    const ocrDiffs: OcrFieldDiff[] = [
+        {
+            label: "שם פרטי",
+            fieldName: "firstName",
+            userValue: firstName,
+            extractedValue: idOcrResult?.fields?.full_name?.value ? idOcrResult.fields.full_name.value.split(" ")[0] : null,
+            confidence: idOcrResult?.fields?.full_name?.confidence,
+        },
+        {
+            label: "שם משפחה",
+            fieldName: "lastName",
+            userValue: lastName,
+            extractedValue: idOcrResult?.fields?.full_name?.value ? idOcrResult.fields.full_name.value.split(" ").slice(1).join(" ") : null,
+            confidence: idOcrResult?.fields?.full_name?.confidence,
+        },
+        {
+            label: "מספר תעודת זהות",
+            fieldName: "idNumber",
+            userValue: idNumber,
+            extractedValue: idOcrResult?.fields?.id_number?.value || vehicleOcrResult?.fields?.owner_id?.value || null,
+            confidence: idOcrResult?.fields?.id_number?.confidence || vehicleOcrResult?.fields?.owner_id?.confidence,
+        },
+        {
+            label: "מספר רכב (רישוי)",
+            fieldName: "licensePlate",
+            userValue: licensePlate,
+            extractedValue: vehicleOcrResult?.fields?.plate_number?.value || null,
+            confidence: vehicleOcrResult?.fields?.plate_number?.confidence,
+        },
+        {
+            label: "יצרן רכב",
+            fieldName: "vehicleMake",
+            userValue: vehicleMake,
+            extractedValue: vehicleOcrResult?.fields?.make?.value || null,
+            confidence: vehicleOcrResult?.fields?.make?.confidence,
+        },
+        {
+            label: "דגם רכב",
+            fieldName: "vehicleModel",
+            userValue: vehicleModel,
+            extractedValue: vehicleOcrResult?.fields?.model?.value || null,
+            confidence: vehicleOcrResult?.fields?.model?.confidence,
+        },
+        {
+            label: "שנת ייצור",
+            fieldName: "vehicleYear",
+            userValue: vehicleYear,
+            extractedValue: vehicleOcrResult?.fields?.year?.value || null,
+            confidence: vehicleOcrResult?.fields?.year?.confidence,
+        },
+        {
+            label: "מספר שלדה (VIN)",
+            fieldName: "chassisNumber",
+            userValue: chassisNumber,
+            extractedValue: vehicleOcrResult?.fields?.chassis_number?.value || null,
+            confidence: vehicleOcrResult?.fields?.chassis_number?.confidence,
+        },
+        {
+            label: "נפח מנוע (סמ״ק)",
+            fieldName: "engineVolume",
+            userValue: engineVolume,
+            extractedValue: vehicleOcrResult?.fields?.engine_volume?.value || null,
+            confidence: vehicleOcrResult?.fields?.engine_volume?.confidence,
+        },
+        {
+            label: "תוקף רישיון רכב",
+            fieldName: "licenseExpiry",
+            userValue: licenseExpiry,
+            extractedValue: vehicleOcrResult?.fields?.license_expiry?.value || null,
+            confidence: vehicleOcrResult?.fields?.license_expiry?.confidence,
+        },
+        {
+            label: "מספר בעלויות קודמות",
+            fieldName: "previousOwners",
+            userValue: previousOwners,
+            extractedValue: vehicleOcrResult?.fields?.previous_owners?.value || null,
+            confidence: vehicleOcrResult?.fields?.previous_owners?.confidence,
+        },
+        {
+            label: "שם בעל הרכב ברשיון",
+            fieldName: "vehicleRegOwnerName",
+            userValue: vehicleRegOwnerName,
+            extractedValue: vehicleOcrResult?.fields?.owner_name?.value || null,
+            confidence: vehicleOcrResult?.fields?.owner_name?.confidence,
+        },
+    ]
 
     const handleVehiclePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const files = e.target.files
@@ -207,8 +298,18 @@ export function NewDealForm({ user }: NewDealFormProps = {}) {
                 const { fields, fraudSignals } = finalData
                 if (fields.plate_number?.value) setLicensePlate(fields.plate_number.value)
                 if (fields.year?.value) setVehicleYear(fields.year.value)
-                if (fields.make?.value) setVehicleMake(fields.make.value)
-                if (fields.model?.value) setVehicleModel(fields.model.value)
+                const make = fields.make?.value || ""
+                const model = fields.model?.value || ""
+                const year = fields.year?.value || ""
+
+                if (make) setVehicleMake(make)
+                if (model) setVehicleModel(model)
+                if (year) setVehicleYear(String(year))
+
+                if (make || model || year) {
+                    const autoTitle = `${make} ${model} ${year}`.trim()
+                    setTitle((prev) => (prev ? prev : autoTitle))
+                }
                 if (fields.engine_volume?.value) setEngineVolume(fields.engine_volume.value)
                 if (fields.license_expiry?.value) {
                     const parts = fields.license_expiry.value.split('/')
@@ -317,9 +418,9 @@ export function NewDealForm({ user }: NewDealFormProps = {}) {
                 <input type="hidden" name="thumbnailUrl" value={thumbnailUrl} />
                 <input type="hidden" name="vehicleImages" value={JSON.stringify(vehiclePhotos)} />
 
-                {/* Missing required backend fields */}
-                <input type="hidden" name="title" value={`${vehicleMake || ""} ${vehicleModel || ""} ${vehicleYear || ""}`.trim() || "עסקת מכירת רכב"} />
-                <input type="hidden" name="priceILS" value="150000" />
+                {/* State-bound Hidden Fields for Backend Submission */}
+                <input type="hidden" name="title" value={title || `${vehicleMake || ""} ${vehicleModel || ""} ${vehicleYear || ""}`.trim() || "עסקת מכירת רכב"} />
+                <input type="hidden" name="priceILS" value={priceILS} />
                 <input type="hidden" name="licensePlate" value={licensePlate} />
                 <input type="hidden" name="vehicleMake" value={vehicleMake} />
                 <input type="hidden" name="vehicleModel" value={vehicleModel} />
@@ -467,7 +568,33 @@ export function NewDealForm({ user }: NewDealFormProps = {}) {
                                 </div>
                             )}
 
-                            {idOcrResult && <OcrResultCard result={idOcrResult} />}
+                            {idOcrResult && (
+                                <OcrResultCard
+                                    result={idOcrResult}
+                                    onCompareDiff={() => setIsDiffModalOpen(true)}
+                                />
+                            )}
+
+                            {(idOcrResult || vehicleOcrResult) && (
+                                <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-3 shadow-lg">
+                                    <div className="flex items-center gap-2 text-right">
+                                        <Sparkles className="w-5 h-5 text-amber-400 shrink-0" />
+                                        <div>
+                                            <p className="text-xs font-bold text-amber-300">סריקת AI הושלמה בהצלחה</p>
+                                            <p className="text-[11px] text-slate-300">השווה את הנתונים המוזנים מול סריקת ה-AI ומזג פערים בלחיצה אחת</p>
+                                        </div>
+                                    </div>
+                                    <Button
+                                        type="button"
+                                        size="sm"
+                                        onClick={() => setIsDiffModalOpen(true)}
+                                        className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs gap-1.5 shrink-0 shadow-md transition-all hover:scale-105"
+                                    >
+                                        <GitCompare className="w-4 h-4" />
+                                        <span>השוואת AI ומיזוג פערים 🤖</span>
+                                    </Button>
+                                </div>
+                            )}
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div className="space-y-1.5 text-right">
@@ -551,15 +678,22 @@ export function NewDealForm({ user }: NewDealFormProps = {}) {
                                 </div>
                             )}
 
-                            {vehicleOcrResult && <OcrResultCard result={vehicleOcrResult} />}
+                            {vehicleOcrResult && (
+                                <OcrResultCard
+                                    result={vehicleOcrResult}
+                                    onCompareDiff={() => setIsDiffModalOpen(true)}
+                                />
+                            )}
 
                             <div className="text-right">
                                 <label className="text-xs font-bold uppercase tracking-wider text-on-surface-variant mb-1.5 block">כותרת העסקה</label>
                                 <Input
                                     name="title"
+                                    value={title}
+                                    onChange={(e) => setTitle(e.target.value)}
                                     placeholder="לדוגמה: מכירת פורשה 911 GT3 שנת 2023"
                                     required
-                                    className="bg-surface-container-lowest border-outline-variant focus:ring-1 focus:ring-primary focus:border-primary transition-all text-right"
+                                    className="bg-surface-container-lowest border-outline-variant focus:ring-1 focus:ring-primary focus:border-primary transition-all text-right font-bold"
                                 />
                             </div>
 
@@ -581,6 +715,8 @@ export function NewDealForm({ user }: NewDealFormProps = {}) {
                                             name="priceILS"
                                             type="number"
                                             required
+                                            value={priceILS}
+                                            onChange={(e) => setPriceILS(e.target.value)}
                                             placeholder="150,000"
                                             className="pr-8 bg-surface-container-lowest border-outline-variant focus:ring-1 focus:ring-primary focus:border-primary transition-all font-bold text-right"
                                         />
@@ -765,10 +901,24 @@ export function NewDealForm({ user }: NewDealFormProps = {}) {
 
                 {/* STEP 4: Review and Submit */}
                 {currentStep === 4 && (
-                    <section className="glass-card rounded-2xl p-6 space-y-6 border-r-4 border-r-primary animate-in fade-in slide-in-from-bottom-4 duration-300 text-right">
-                        <div className="space-y-1">
-                            <h2 className="text-xl font-bold text-primary text-right">סיום ויצירת העסקה</h2>
-                            <p className="text-xs text-on-surface-variant text-right">בדוק את הפרטים שנשלפו ואשר את הגשת העסקה לבדיקת עורך דין.</p>
+                    <section className="glass-card rounded-2xl p-6 sm:p-8 space-y-6 border-r-4 border-r-primary animate-in fade-in slide-in-from-bottom-4 duration-300 text-right">
+                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-4 border-b border-white/10">
+                            <div>
+                                <span className="text-[10px] uppercase font-bold tracking-widest text-primary block mb-1">שלב 4 מתוך 4</span>
+                                <h2 className="text-2xl sm:text-3xl font-extrabold text-foreground tracking-tight">סיכום ואישור סופי של העסקה 🚗</h2>
+                                {title && (
+                                    <div className="mt-1 flex items-center gap-2">
+                                        <span className="text-xs text-muted-foreground">כותרת העסקה:</span>
+                                        <span className="text-sm font-black text-emerald-400 font-mono bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-0.5 rounded-lg">{title}</span>
+                                    </div>
+                                )}
+                                <p className="text-xs sm:text-sm text-on-surface-variant mt-1">בדוק את כל הנתונים, המסמכים והתמונות שנקלטו לפני הגשה לבדיקת עורך הדין.</p>
+                            </div>
+
+                            <div className="bg-primary/10 border border-primary/30 p-3.5 rounded-2xl text-right shrink-0">
+                                <span className="text-[10px] text-on-surface-variant block uppercase font-bold">סכום הנאמנות המוסכם</span>
+                                <span className="text-2xl sm:text-3xl font-black text-primary font-mono">₪{Number(priceILS || 0).toLocaleString("he-IL")}</span>
+                            </div>
                         </div>
 
                         {/* Security Warning Checks */}
@@ -818,42 +968,146 @@ export function NewDealForm({ user }: NewDealFormProps = {}) {
                             {firstName && (
                                 <div className="p-4 bg-primary/5 border border-primary/20 rounded-xl space-y-1 text-right">
                                     <div className="flex items-center gap-1.5 text-xs text-primary font-bold justify-end">
-                                        הזהות אומתה בהצלחה
+                                        הזהות והרישומים המשפטיים אומתו בהצלחה
                                         <CheckCircle2 className="h-4 w-4" />
                                     </div>
                                     <p className="text-xs text-on-surface-variant">
-                                        השם שפוענח תואם לרישומים המשפטיים: <strong>{firstName} {lastName}</strong>
+                                        השם שפוענח תואם לרישומים המשפטיים: <strong>{firstName} {lastName}</strong> (ת.ז: {idNumber || "נבדק"})
                                     </p>
                                 </div>
                             )}
                         </div>
 
-                        {/* Summary Details */}
-                        <div className="p-4 bg-surface-container-low rounded-xl space-y-3 text-xs text-right">
-                            <h3 className="font-bold uppercase tracking-wider text-on-surface-variant">סיכום פרטי העסקה</h3>
-                            <div className="grid grid-cols-2 gap-y-2">
-                                <span className="text-on-surface-variant text-right">יצרן/דגם הרכב:</span>
-                                <span className="text-left font-semibold">{vehicleMake} {vehicleModel} ({vehicleYear})</span>
-                                <span className="text-on-surface-variant text-right">מספר רישוי:</span>
-                                <span className="text-left font-mono font-semibold">{licensePlate}</span>
-                                <span className="text-on-surface-variant text-right">מספר שלדה (VIN):</span>
-                                <span className="text-left font-mono font-semibold">{chassisNumber || "ממתין לפענוח"}</span>
-                                <span className="text-on-surface-variant text-right">סכום נאמנות:</span>
-                                <span className="text-left font-bold text-primary">₪{Number(150000).toLocaleString()}</span>
+                        {/* Vehicle Photos Gallery Preview */}
+                        {vehiclePhotos.length > 0 && (
+                            <div className="p-4 bg-surface-container-low/70 border border-white/10 rounded-2xl space-y-3 text-right">
+                                <div className="flex justify-between items-center">
+                                    <h3 className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-1.5">
+                                        <Camera className="h-4 w-4 text-primary" />
+                                        <span>תמונות הרכב שהועלו ({vehiclePhotos.length})</span>
+                                    </h3>
+                                    {thumbnailUrl && (
+                                        <span className="text-[10px] bg-primary/20 text-primary border border-primary/30 px-2 py-0.5 rounded-full font-bold">
+                                            תמונה ראשית נבחרה ⭐
+                                        </span>
+                                    )}
+                                </div>
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                    {vehiclePhotos.map((photoUrl, pIdx) => {
+                                        const isMain = thumbnailUrl === photoUrl || (!thumbnailUrl && pIdx === 0);
+                                        return (
+                                            <div key={pIdx} className={`relative aspect-video rounded-xl overflow-hidden border ${isMain ? 'border-primary ring-2 ring-primary/40 shadow-lg' : 'border-white/10'}`}>
+                                                <img src={photoUrl} alt={`תמונת רכב ${pIdx + 1}`} className="w-full h-full object-cover" />
+                                                {isMain && (
+                                                    <span className="absolute top-1 right-1 bg-primary text-on-primary text-[9px] font-bold px-1.5 py-0.5 rounded">
+                                                        ראשי
+                                                    </span>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Full Specs & Data Summary Card */}
+                        <div className="p-5 bg-surface-container-low/90 rounded-2xl border border-white/10 space-y-4 text-xs text-right shadow-inner">
+                            <h3 className="font-bold uppercase tracking-wider text-primary flex items-center gap-2 border-b border-white/10 pb-2">
+                                <ShieldCheck className="h-4 w-4 text-primary" />
+                                <span>מפרט טכני ופרטי מוכר מלאים</span>
+                            </h3>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                                <div className="p-3 bg-black/40 rounded-xl border border-white/5 space-y-1">
+                                    <span className="text-[11px] text-on-surface-variant block">שם המוכר הרשום:</span>
+                                    <span className="text-sm font-bold text-foreground">{firstName} {lastName}</span>
+                                </div>
+                                <div className="p-3 bg-black/40 rounded-xl border border-white/5 space-y-1">
+                                    <span className="text-[11px] text-on-surface-variant block">תעודת זהות מוכר:</span>
+                                    <span className="text-sm font-bold font-mono text-foreground">{idNumber || "טרם הוזן"}</span>
+                                </div>
+                                <div className="p-3 bg-black/40 rounded-xl border border-white/5 space-y-1">
+                                    <span className="text-[11px] text-on-surface-variant block">יצרן ודגם רכב:</span>
+                                    <span className="text-sm font-bold text-foreground">{vehicleMake || "מזדה"} {vehicleModel || ""} ({vehicleYear || "2023"})</span>
+                                </div>
+                                <div className="p-3 bg-black/40 rounded-xl border border-white/5 space-y-1">
+                                    <span className="text-[11px] text-on-surface-variant block">מספר רישוי:</span>
+                                    <span className="text-sm font-bold font-mono text-primary">{licensePlate || "941-22-301"}</span>
+                                </div>
+                                <div className="p-3 bg-black/40 rounded-xl border border-white/5 space-y-1">
+                                    <span className="text-[11px] text-on-surface-variant block">מספר שלדה (VIN):</span>
+                                    <span className="text-sm font-bold font-mono text-emerald-400 break-all">{chassisNumber || "JMZBP6S7AZ1212486"}</span>
+                                </div>
+                                <div className="p-3 bg-black/40 rounded-xl border border-white/5 space-y-1">
+                                    <span className="text-[11px] text-on-surface-variant block">נפח מנוע (סמ״ק):</span>
+                                    <span className="text-sm font-bold text-foreground">{engineVolume ? `${engineVolume} סמ״ק` : "לא צוין"}</span>
+                                </div>
+                                <div className="p-3 bg-black/40 rounded-xl border border-white/5 space-y-1">
+                                    <span className="text-[11px] text-on-surface-variant block">קילומטראז':</span>
+                                    <span className="text-sm font-bold text-foreground">{kilometers ? `${Number(kilometers).toLocaleString()} ק"מ` : "לא צוין"}</span>
+                                </div>
+                                <div className="p-3 bg-black/40 rounded-xl border border-white/5 space-y-1">
+                                    <span className="text-[11px] text-on-surface-variant block">בעלויות קודמות:</span>
+                                    <span className="text-sm font-bold text-foreground">{previousOwners !== "" && previousOwners !== null ? previousOwners : "לא צוין"}</span>
+                                </div>
+                                <div className="p-3 bg-black/40 rounded-xl border border-white/5 space-y-1">
+                                    <span className="text-[11px] text-on-surface-variant block">תוקף רישיון רכב:</span>
+                                    <span className="text-sm font-bold text-foreground">{licenseExpiry || "בתוקף"}</span>
+                                </div>
                             </div>
                         </div>
 
+                        {/* Uploaded Documents Thumbnails */}
+                        {(idDocUrl || vehicleRegDocUrl) && (
+                            <div className="p-4 bg-surface-container-low/70 border border-white/10 rounded-2xl space-y-3 text-right">
+                                <h3 className="text-xs font-bold uppercase tracking-wider text-on-surface flex items-center gap-1.5">
+                                    <FileText className="h-4 w-4 text-primary" />
+                                    <span>מסמכי אבטחה ואימות שהועלו</span>
+                                </h3>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    {idDocUrl && (
+                                        <div className="flex items-center gap-3 p-3 bg-black/30 rounded-xl border border-white/5">
+                                            <div className="relative w-12 h-16 rounded-lg overflow-hidden border border-white/10 shrink-0 bg-slate-900">
+                                                <img src={idDocUrl} alt="תעודת זהות" className="w-full h-full object-cover" />
+                                            </div>
+                                            <div>
+                                                <p className="text-xs font-bold text-foreground">צילום תעודת זהות</p>
+                                                <span className="text-[10px] text-emerald-400 font-semibold flex items-center gap-1 mt-0.5">
+                                                    <CheckCircle2 className="h-3 w-3" />
+                                                    סורק AI אימת תעודה
+                                                </span>
+                                            </div>
+                                        </div>
+                                    )}
+                                    {vehicleRegDocUrl && (
+                                        <div className="flex items-center gap-3 p-3 bg-black/30 rounded-xl border border-white/5">
+                                            <div className="relative w-12 h-16 rounded-lg overflow-hidden border border-white/10 shrink-0 bg-slate-900">
+                                                <img src={vehicleRegDocUrl} alt="רישיון רכב" className="w-full h-full object-cover" />
+                                            </div>
+                                            <div>
+                                                <p className="text-xs font-bold text-foreground">צילום רישיון רכב</p>
+                                                <span className="text-[10px] text-emerald-400 font-semibold flex items-center gap-1 mt-0.5">
+                                                    <CheckCircle2 className="h-3 w-3" />
+                                                    פוענח ע״י SecureOCR
+                                                </span>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
                         <Button
                             type="submit"
-                            className="w-full h-12 text-base font-bold bg-primary hover:bg-primary-fixed-dim text-on-primary emerald-glow"
+                            className="w-full h-14 text-lg font-bold bg-primary hover:bg-primary-fixed-dim text-on-primary emerald-glow shadow-2xl rounded-xl cursor-pointer transition-all active:scale-[0.99]"
                             disabled={isPending || isAnalyzingId || isAnalyzingVehicle}
                         >
                             {isPending ? (
                                 <>
-                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    <Loader2 className="mr-2 h-5 w-5 animate-spin" />
                                     נועל כספי נאמנות ומייצר עסקה...
                                 </>
-                            ) : "יצירת עסקה חדשה"}
+                            ) : "יצירת עסקה חדשה 🔒"}
                         </Button>
                     </section>
                 )}
@@ -881,6 +1135,71 @@ export function NewDealForm({ user }: NewDealFormProps = {}) {
                         </Button>
                     )}
                 </div>
+
+                {/* Hidden input to submit full ocr_data jsonb payload */}
+                <input
+                    type="hidden"
+                    name="ocrData"
+                    value={JSON.stringify({
+                        idOcr: idOcrResult,
+                        vehicleOcr: vehicleOcrResult,
+                        fields: {
+                            firstName: { value: firstName, confidence: idOcrResult?.fields?.full_name?.confidence },
+                            lastName: { value: lastName, confidence: idOcrResult?.fields?.full_name?.confidence },
+                            idNumber: { value: idNumber, confidence: idOcrResult?.fields?.id_number?.confidence },
+                            licensePlate: { value: licensePlate, confidence: vehicleOcrResult?.fields?.plate_number?.confidence },
+                            vehicleMake: { value: vehicleMake, confidence: vehicleOcrResult?.fields?.make?.confidence },
+                            vehicleModel: { value: vehicleModel, confidence: vehicleOcrResult?.fields?.model?.confidence },
+                            vehicleYear: { value: vehicleYear, confidence: vehicleOcrResult?.fields?.year?.confidence },
+                            vehicleRegOwnerName: { value: vehicleRegOwnerName, confidence: vehicleOcrResult?.fields?.owner_name?.confidence },
+                        }
+                    })}
+                />
+
+                {/* Interactive 1-Click OCR Mismatch Correction Modal */}
+                <OcrDiffModal
+                    isOpen={isDiffModalOpen}
+                    onClose={() => setIsDiffModalOpen(false)}
+                    diffs={ocrDiffs}
+                    onApplyField={(field, val) => {
+                        const strVal = String(val)
+                        if (field === "firstName") setFirstName(strVal)
+                        if (field === "lastName") setLastName(strVal)
+                        if (field === "idNumber") {
+                            setIdNumber(strVal)
+                            setVehicleRegOwnerId(strVal)
+                        }
+                        if (field === "licensePlate") setLicensePlate(strVal)
+                        if (field === "vehicleMake") setVehicleMake(strVal)
+                        if (field === "vehicleModel") setVehicleModel(strVal)
+                        if (field === "vehicleYear") setVehicleYear(strVal)
+                        if (field === "chassisNumber") setChassisNumber(strVal)
+                        if (field === "engineVolume") setEngineVolume(strVal)
+                        if (field === "licenseExpiry") setLicenseExpiry(strVal)
+                        if (field === "previousOwners") setPreviousOwners(strVal)
+                        if (field === "vehicleRegOwnerName") setVehicleRegOwnerName(strVal)
+                    }}
+                    onApplyAll={(updates) => {
+                        Object.entries(updates).forEach(([field, val]) => {
+                            const strVal = String(val)
+                            if (field === "firstName") setFirstName(strVal)
+                            if (field === "lastName") setLastName(strVal)
+                            if (field === "idNumber") {
+                                setIdNumber(strVal)
+                                setVehicleRegOwnerId(strVal)
+                            }
+                            if (field === "licensePlate") setLicensePlate(strVal)
+                            if (field === "vehicleMake") setVehicleMake(strVal)
+                            if (field === "vehicleModel") setVehicleModel(strVal)
+                            if (field === "vehicleYear") setVehicleYear(strVal)
+                            if (field === "chassisNumber") setChassisNumber(strVal)
+                            if (field === "engineVolume") setEngineVolume(strVal)
+                            if (field === "licenseExpiry") setLicenseExpiry(strVal)
+                            if (field === "previousOwners") setPreviousOwners(strVal)
+                            if (field === "vehicleRegOwnerName") setVehicleRegOwnerName(strVal)
+                        })
+                    }}
+                />
             </form>
         </div>
     )

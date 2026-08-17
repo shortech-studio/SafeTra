@@ -13,7 +13,8 @@ import {
     ChevronDown, 
     ChevronUp,
     FileText,
-    Gauge
+    Gauge,
+    GitCompare
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { OCRResult } from "@/types/ocr"
@@ -21,9 +22,10 @@ import { OCRResult } from "@/types/ocr"
 interface OcrResultCardProps {
     result: OCRResult
     title?: string
+    onCompareDiff?: () => void
 }
 
-export function OcrResultCard({ result, title }: OcrResultCardProps) {
+export function OcrResultCard({ result, title, onCompareDiff }: OcrResultCardProps) {
     const [showRawJson, setShowRawJson] = useState(false)
 
     if (!result) return null
@@ -63,7 +65,7 @@ export function OcrResultCard({ result, title }: OcrResultCardProps) {
     return (
         <div className="rounded-2xl border border-emerald-500/30 bg-slate-950/90 backdrop-blur-xl p-5 space-y-4 shadow-2xl animate-in fade-in duration-300 text-right">
             {/* Header */}
-            <div className="flex items-center justify-between border-b border-white/10 pb-3">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between border-b border-white/10 pb-3 gap-3">
                 <div className="flex items-center gap-2">
                     <div className="p-2 bg-emerald-500/20 text-emerald-400 rounded-xl border border-emerald-500/30">
                         <Sparkles className="h-5 w-5" />
@@ -77,10 +79,24 @@ export function OcrResultCard({ result, title }: OcrResultCardProps) {
                     </div>
                 </div>
 
-                {/* AI Confidence Badge */}
-                <div className="px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/30 rounded-xl flex items-center gap-1.5 text-xs text-emerald-400 font-bold shadow-sm">
-                    <span>{meanConfidence || 95}%</span>
-                    <span className="text-[10px] text-emerald-400/80">דיוק AI</span>
+                <div className="flex items-center gap-2 self-end sm:self-auto">
+                    {onCompareDiff && (
+                        <Button
+                            type="button"
+                            size="sm"
+                            onClick={onCompareDiff}
+                            className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs gap-1.5 shadow-md hover:scale-105 transition-all"
+                        >
+                            <GitCompare className="h-4 w-4" />
+                            <span>השוואת AI ומיזוג פערים</span>
+                        </Button>
+                    )}
+
+                    {/* AI Confidence Badge */}
+                    <div className="px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/30 rounded-xl flex items-center gap-1.5 text-xs text-emerald-400 font-bold shadow-sm">
+                        <span>{meanConfidence || 95}%</span>
+                        <span className="text-[10px] text-emerald-400/80">דיוק AI</span>
+                    </div>
                 </div>
             </div>
 
